@@ -1,0 +1,16 @@
+abstraction-provider-thenoise
+Copyright 2026 the openabstractions contributors
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+TheNoise is a separate third-party engine and is not included in this
+repository. Its source and release assets are licensed by their respective
+authors; see https://github.com/lemonade-sdk/thenoise and the release notes.
+The qualified Windows bundle is TheNoise 0.9.1 ROCm 10.1.0 for gfx1151.
+Its upstream release archive SHA-256 is
+0a639633d6aff9523190c557f2377ba8ef4afab5b02644b3778082793cbdf737.
+This provider does not redistribute that archive or any model weights.
+
+Third-party components compiled into this software are recorded in
+THIRD_PARTY_NOTICES.md in the abstractions repository:
+https://github.com/openabstractions/abstractions/blob/main/THIRD_PARTY_NOTICES.md
