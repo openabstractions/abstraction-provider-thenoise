@@ -9,6 +9,8 @@ resource-leased engine process.
 
 Binds: [inference.thrift](https://github.com/openabstractions/abstraction-inference/blob/main/inference.thrift)
 
+The conventions every OA contract carries are stated once in [CONVENTIONS.md](https://github.com/openabstractions/abstractions/blob/main/idl/CONVENTIONS.md); a rule here that applies one cites its `CONV-` id.
+
 ## Engine boundary
 
 The adapter admits one generated image for its configured model and maps the

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginefiles"
+	"github.com/openabstractions/abstraction-facade/go/programfiles"
 	"golang.org/x/sys/windows"
 )
 
@@ -26,7 +26,7 @@ func TestALockedEngineFileRefusesOnlyThatLaunch(t *testing.T) {
 	}
 	_, err = launchEngine(t.Context(), v, engineDir, manifestFile(stateDir), pin)
 	windows.CloseHandle(lock)
-	if !errors.Is(err, enginefiles.ErrUnreadable) || !errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, enginefiles.ErrMismatch) ||
+	if !errors.Is(err, programfiles.ErrUnreadable) || !errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, programfiles.ErrMismatch) ||
 		strings.Contains(err.Error(), "-engine-zip") || !strings.Contains(err.Error(), "thenoise.bat") {
 		t.Fatalf("a locked engine file: %v", err)
 	}

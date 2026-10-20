@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginefiles"
+	"github.com/openabstractions/abstraction-facade/go/programfiles"
 )
 
 func TestInstallExtractsTheVerifiedZIPAndRecordsItsManifest(t *testing.T) {
@@ -112,7 +112,7 @@ func TestInstallRefusesEscapingEntries(t *testing.T) {
 			}
 			engineDir := filepath.Join(base, "e")
 			err = installEngine(t.Context(), testFiles(), zipPath, digestHex(data), int64(len(data)), engineDir, manifestFile(filepath.Join(base, "state")), strings.Repeat("0", 64))
-			if !errors.Is(err, enginefiles.ErrArchive) {
+			if !errors.Is(err, programfiles.ErrArchive) {
 				t.Fatalf("entry %q: %v, wanted the kit's archive refusal", name, err)
 			}
 			if _, statErr := os.Stat(filepath.Join(base, "evil.dll")); statErr == nil {
@@ -197,32 +197,39 @@ func TestVerificationRefusesAnExtraFile(t *testing.T) {
 
 // INF-F1..INF-F4 through the provider: the first launch of a process hashes
 // in full, later ones check metadata, a same-size change in place is caught,
-// and a folder without the read-only ACL refuses the launch.
+// and a folder whose read-only ACL cannot be set again refuses the launch.
 func TestLaunchUsesTheSharedEngineFileKit(t *testing.T) {
 	engineDir, stateDir, pin := installSmall(t)
 	v := testFiles()
-	h, err := launchEngine(t.Context(), v, engineDir, manifestFile(stateDir), pin)
-	if err != nil || !h.Full() {
-		t.Fatalf("first launch of the process: full=%v %v", h.Full(), err)
+	// The install's record proves the tree for this and every later
+	// provider process (Decision 2, amendment 2).
+	for i := 0; i < 2; i++ {
+		h, err := launchEngine(t.Context(), v, engineDir, manifestFile(stateDir), pin)
+		if err != nil || h.Full() {
+			t.Fatalf("launch %d after the install: full=%v %v", i+1, h.Full(), err)
+		}
+		h.Release()
 	}
-	h.Release()
-	h, err = launchEngine(t.Context(), v, engineDir, manifestFile(stateDir), pin)
-	if err != nil || h.Full() {
-		t.Fatalf("second launch: full=%v %v", h.Full(), err)
-	}
-	h.Release()
 	if _, err := os.Stat(recordFile(manifestFile(stateDir))); err != nil {
 		t.Fatalf("no metadata record beside the manifest: %v", err)
+	}
+	original, err := os.ReadFile(filepath.Join(engineDir, "thenoise.bat"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(engineDir, "thenoise.bat"), []byte("@echo  on\r\n"), 0o644); err != nil { // same size
 		t.Fatal(err)
 	}
-	if _, err := launchEngine(t.Context(), v, engineDir, manifestFile(stateDir), pin); !errors.Is(err, enginefiles.ErrMismatch) || !strings.Contains(err.Error(), "thenoise.bat") {
+	if _, err := launchEngine(t.Context(), v, engineDir, manifestFile(stateDir), pin); !errors.Is(err, programfiles.ErrMismatch) || !strings.Contains(err.Error(), "thenoise.bat") {
 		t.Fatalf("a same-size launcher change passed the metadata launch: %v", err)
 	}
-	refusing := enginefiles.NewVerifier(enginefiles.Options{ACL: testACL{refuse: true}})
+	if err := os.WriteFile(filepath.Join(engineDir, "thenoise.bat"), original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A folder whose ACL cannot be set again refuses with the remedy.
+	refusing := programfiles.NewVerifier(programfiles.Options{ACL: testACL{refuse: true}})
 	_, err = launchEngine(t.Context(), refusing, engineDir, manifestFile(stateDir), pin)
-	if !errors.Is(err, enginefiles.ErrFolderACL) || !strings.Contains(err.Error(), "delete the engine manifest under -state") || !strings.Contains(err.Error(), "-engine-zip") {
+	if !errors.Is(err, programfiles.ErrFolderACL) || !strings.Contains(err.Error(), "delete the engine manifest under -state") || !strings.Contains(err.Error(), "-engine-zip") {
 		t.Fatalf("a folder without the read-only ACL launched, or the refusal names no remedy: %v", err)
 	}
 }
@@ -245,8 +252,8 @@ func TestLaunchOfADeletedEngineFolderNamesTheReinstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := launchEngine(t.Context(), testFiles(), engineDir, manifestFile(stateDir), pin)
-	var mismatch *enginefiles.MismatchError
-	if !errors.As(err, &mismatch) || mismatch.Kind != enginefiles.Missing || mismatch.Path != "." || errors.Is(err, enginefiles.ErrUnreadable) ||
+	var mismatch *programfiles.MismatchError
+	if !errors.As(err, &mismatch) || mismatch.Kind != programfiles.Missing || mismatch.Path != "." || errors.Is(err, programfiles.ErrUnreadable) ||
 		!strings.Contains(err.Error(), "delete the engine manifest under -state") || !strings.Contains(err.Error(), "-engine-zip") {
 		t.Fatalf("a deleted engine folder: %v", err)
 	}

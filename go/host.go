@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	inference "github.com/openabstractions/abstraction-inference/go"
-	"github.com/openabstractions/abstraction-inference/go/providerhost"
+	"github.com/openabstractions/abstraction-provider-kit/go/providerhost"
 	router "github.com/openabstractions/abstraction-router/go"
 )
 

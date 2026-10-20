@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,11 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/openabstractions/abstraction-facade/go/programfiles"
 	"github.com/openabstractions/abstraction-facade/go/supervision"
 	identity "github.com/openabstractions/abstraction-identity"
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginefiles"
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginehttp"
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginelaunch"
+	"github.com/openabstractions/abstraction-provider-kit/go/enginehttp"
+	"github.com/openabstractions/abstraction-provider-kit/go/enginelaunch"
 	"github.com/openabstractions/abstraction-resource/go/holder"
 	router "github.com/openabstractions/abstraction-router/go"
 )
@@ -111,7 +112,7 @@ type Runtime struct {
 	manifestPin string
 	// files proves and holds the engine tree for this provider process
 	// (INF-F1..INF-F4); tests give it a fake folder ACL.
-	files *enginefiles.Verifier
+	files *programfiles.Verifier
 	// gpuOff latches after a GPU generation exits with an access violation
 	// (security review condition 8); it clears only with a new provider.
 	gpuOff atomic.Bool
@@ -133,7 +134,7 @@ type engineProcess struct {
 	exited   sync.Once
 	// hold keeps the engine tree's files open with read sharing only until
 	// the process tree's exit is confirmed.
-	hold *enginefiles.Hold
+	hold *programfiles.Hold
 }
 
 // released closes the held engine files once the process tree has exited.
@@ -178,7 +179,7 @@ func NewRuntime(cfg ManagedConfig) (*Runtime, error) {
 		return nil, err
 	}
 	r := &Runtime{cfg: cfg, probe: systemGPUProbe(), cacheSec: systemCacheSecurity(), manifestPin: EngineManifestSHA256,
-		files: enginefiles.NewVerifier(enginefiles.Options{})}
+		files: programfiles.NewVerifier(programfiles.Options{})}
 	h, err := holder.New(holder.Options{Leases: cfg.Leases, Resource: cfg.Resource, Idle: cfg.Idle, Renew: cfg.Renew, Wait: cfg.Wait, OnError: cfg.OnError,
 		Active: func(name string) bool {
 			r.mu.RLock()
@@ -199,13 +200,19 @@ func (r *Runtime) Engine() *Engine { return r.engine }
 
 // Admit checks the configured single model without loading it. Slow resource
 // acquisition and readiness happen inside the accepted operation, where they
-// remain cancellable and visible through operation progress.
+// remain cancellable and visible through operation progress. Another model
+// reads model:undeclared (45bfa74923). Rights owns not_permitted, which
+// fails a durable job when returned by its hook (inference INF-A5).
+// A closing runtime reads unavailable. A job recovered by the next process asks again.
 func (r *Runtime) Admit(ctx context.Context, _ *router.Host, model string) (string, bool) {
 	if ctx.Err() != nil {
 		return "caller", false
 	}
-	if model != r.cfg.Engine.Model || r.closed.Load() {
-		return "not_permitted", false
+	if model != r.cfg.Engine.Model {
+		return "model:undeclared", false
+	}
+	if r.closed.Load() {
+		return "unavailable", false
 	}
 	return "", true
 }
@@ -310,6 +317,7 @@ func (r *Runtime) start(ctx context.Context) (*engineProcess, error) {
 		return nil, err
 	}
 	current := &engineProcess{proc: process, contains: process.Contains, owner: r, gpu: device == "cuda", hold: hold}
+	logTransport(stderr)
 	current.alive.Store(true)
 	current.client, err = engineClient(r.cfg.Engine.Endpoint, process)
 	if err != nil {
@@ -333,6 +341,15 @@ func (r *Runtime) start(ctx context.Context) (*engineProcess, error) {
 	return current, nil
 }
 
+func logTransport(output io.Writer) {
+	const reason = "IPC not implemented in this adopter"
+	slog.Info("engine transport", "engine", "TheNoise", "pin", EngineZIPSHA256, "transport", "tcp-loopback", "reason", reason)
+	if output != nil {
+		//unchecked: informational diagnostics do not alter the admitted launch
+		fmt.Fprintf(output, "INFO engine=TheNoise pin=%s transport=tcp-loopback reason=%q\n", EngineZIPSHA256, reason)
+	}
+}
+
 // preflight runs before every launch. It installs the engine from the pinned
 // ZIP when no manifest exists and a ZIP is configured, proves the tree
 // against the pinned manifest and holds it (INF-F1..INF-F4), chooses the
@@ -344,7 +361,7 @@ func (r *Runtime) start(ctx context.Context) (*engineProcess, error) {
 // gate passes and no GPU generation has crashed; otherwise the launch is
 // refused. auto runs on the GPU under the same two conditions and on the CPU
 // otherwise, reporting why.
-func (r *Runtime) preflight(ctx context.Context) (string, []string, *enginefiles.Hold, error) {
+func (r *Runtime) preflight(ctx context.Context) (string, []string, *programfiles.Hold, error) {
 	launch := r.cfg.Launch
 	manifest := manifestFile(launch.StateDir)
 	if launch.EngineZIP != "" {

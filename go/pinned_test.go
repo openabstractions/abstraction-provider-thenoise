@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginefiles"
+	"github.com/openabstractions/abstraction-facade/go/programfiles"
 )
 
 // TestPinnedManifestFromLocalZIP recomputes EngineManifestSHA256 from a local
@@ -19,7 +19,7 @@ func TestPinnedManifestFromLocalZIP(t *testing.T) {
 	}
 	// The kit refuses a ZIP of another size or SHA-256 before it reads an
 	// entry, as the install does.
-	files, err := enginefiles.ArchiveManifest(context.Background(), enginefiles.PinnedArchive{Path: zipPath, Size: EngineZIPBytes, SHA256: EngineZIPSHA256}, zipPrefix)
+	files, err := programfiles.ArchiveManifest(context.Background(), programfiles.PinnedArchive{Path: zipPath, Size: EngineZIPBytes, SHA256: EngineZIPSHA256}, zipPrefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestPinnedManifestFromLocalZIP(t *testing.T) {
 		t.Fatalf("manifest SHA-256 %s, pinned %s", got, EngineManifestSHA256)
 	}
 	if tree := os.Getenv("OA_THENOISE_TREE"); tree != "" {
-		if err := enginefiles.Verify(context.Background(), "thenoise", tree, m.files()); err != nil {
+		if err := programfiles.Verify(context.Background(), "thenoise", tree, m.files()); err != nil {
 			t.Fatalf("extracted tree %s: %v", tree, err)
 		}
 	}

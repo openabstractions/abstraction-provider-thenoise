@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginefiles"
+	"github.com/openabstractions/abstraction-facade/go/programfiles"
 	"golang.org/x/sys/windows"
 )
 
@@ -18,7 +18,7 @@ func privateSDDL(sid string) string {
 }
 
 func TestRealPrivateACLIsWrittenAndChecked(t *testing.T) {
-	sid, err := enginefiles.AccountSID()
+	sid, err := programfiles.AccountSID()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestRealPrivateACLIsWrittenAndChecked(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if owner, err := enginefiles.OwnerSID(file); err != nil || owner != sid {
+	if owner, err := programfiles.OwnerSID(file); err != nil || owner != sid {
 		t.Fatalf("new cache file owner %s (%v), want %s", owner, err, sid)
 	}
 	// Everyone gains the same full control: the ACL is no longer private.

@@ -23,7 +23,7 @@ import (
 	identity "github.com/openabstractions/abstraction-identity"
 	inference "github.com/openabstractions/abstraction-inference/go"
 	wire "github.com/openabstractions/abstraction-inference/go/abstraction/inference/api"
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginehttp"
+	"github.com/openabstractions/abstraction-provider-kit/go/enginehttp"
 )
 
 const maxImageBytes = 20 << 20

@@ -9,13 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginefiles"
+	"github.com/openabstractions/abstraction-facade/go/programfiles"
 )
 
 // manifestHeader starts every engine manifest. The manifest lists each file
@@ -50,10 +51,10 @@ func (m engineManifest) encode() []byte {
 }
 
 // files is the manifest in the shared provider kit's form.
-func (m engineManifest) files() enginefiles.Manifest {
-	out := enginefiles.Manifest{Files: make([]enginefiles.File, len(m.entries))}
+func (m engineManifest) files() programfiles.Manifest {
+	out := programfiles.Manifest{Files: make([]programfiles.File, len(m.entries))}
 	for i, e := range m.entries {
-		out.Files[i] = enginefiles.File{Path: e.Path, Size: e.Size, SHA256: e.SHA256}
+		out.Files[i] = programfiles.File{Path: e.Path, Size: e.Size, SHA256: e.SHA256}
 	}
 	return out
 }
@@ -110,12 +111,12 @@ func recordFile(manifestPath string) string {
 	return filepath.Join(filepath.Dir(manifestPath), EngineFolderName+".files")
 }
 
-func engineTree(engineDir, manifestPath string, m engineManifest) enginefiles.Tree {
-	return enginefiles.Tree{Name: "engine folder " + engineDir, Root: engineDir, Manifest: m.files(), Record: recordFile(manifestPath)}
+func engineTree(engineDir, manifestPath string, m engineManifest) programfiles.Tree {
+	return programfiles.Tree{Name: "engine folder " + engineDir, Root: engineDir, Manifest: m.files(), Record: recordFile(manifestPath)}
 }
 
 // fromFiles is the shared kit's manifest in this provider's form.
-func fromFiles(m enginefiles.Manifest) engineManifest {
+func fromFiles(m programfiles.Manifest) engineManifest {
 	out := engineManifest{entries: make([]manifestEntry, len(m.Files))}
 	for i, f := range m.Files {
 		out.entries[i] = manifestEntry{Path: f.Path, SHA256: f.SHA256, Size: f.Size}
@@ -134,7 +135,7 @@ const zipPrefix = "./"
 // also extracts the ZIP there; an existing tree is kept and must equal the
 // ZIP. The installed tree gets the shared kit's read-only folder ACL.
 func InstallEngine(ctx context.Context, zipPath, engineDir, manifestPath string) error {
-	return installEngine(ctx, enginefiles.NewVerifier(enginefiles.Options{}), zipPath, EngineZIPSHA256, EngineZIPBytes, engineDir, manifestPath, EngineManifestSHA256)
+	return installEngine(ctx, programfiles.NewVerifier(programfiles.Options{}), zipPath, EngineZIPSHA256, EngineZIPBytes, engineDir, manifestPath, EngineManifestSHA256)
 }
 
 // UnlockEngine proves the pinned engine files and gives its read-only folders
@@ -155,10 +156,10 @@ func unlockEngine(ctx context.Context, engineDir, manifestPath, manifestPin stri
 	}
 	// Verify checks the complete pinned tree without requiring every folder's
 	// read-only ACL. UnlockWithin can finish an interrupted earlier unlock.
-	if err := enginefiles.Verify(ctx, "engine folder "+engineDir, engineDir, m.files()); err != nil {
+	if err := programfiles.Verify(ctx, "engine folder "+engineDir, engineDir, m.files()); err != nil {
 		return err
 	}
-	return enginefiles.UnlockWithin(engineDir)
+	return programfiles.UnlockWithin(engineDir)
 }
 
 // installEngine is the provider kit's archive install (inference
@@ -166,7 +167,7 @@ func unlockEngine(ctx context.Context, engineDir, manifestPath, manifestPin stri
 // every file entry is kept, and the recorded manifest must hash to
 // manifestPin before the extracted tree replaces anything. The manifest file
 // is written once the tree is installed.
-func installEngine(ctx context.Context, v *enginefiles.Verifier, zipPath, zipPin string, zipSize int64, engineDir, manifestPath, manifestPin string) error {
+func installEngine(ctx context.Context, v *programfiles.Verifier, zipPath, zipPin string, zipSize int64, engineDir, manifestPath, manifestPin string) error {
 	if !filepath.IsAbs(zipPath) || !filepath.IsAbs(engineDir) || !filepath.IsAbs(manifestPath) {
 		return errors.New("thenoise: engine ZIP, engine folder and manifest must be absolute paths")
 	}
@@ -177,11 +178,11 @@ func installEngine(ctx context.Context, v *enginefiles.Verifier, zipPath, zipPin
 	if extract && utf16Len(filepath.Clean(engineDir)) > MaxEngineDirLength {
 		return fmt.Errorf("thenoise: engine folder %s is longer than %d characters; choose a shorter one with -engine-dir", engineDir, MaxEngineDirLength)
 	}
-	m, err := v.InstallFromArchive(ctx, enginefiles.ArchiveInstall{
-		Archive: enginefiles.PinnedArchive{Path: zipPath, Size: zipSize, SHA256: zipPin},
-		Tree:    enginefiles.Tree{Name: "engine folder " + engineDir, Root: engineDir, Record: recordFile(manifestPath)},
+	m, err := v.InstallFromArchive(ctx, programfiles.ArchiveInstall{
+		Archive: programfiles.PinnedArchive{Path: zipPath, Size: zipSize, SHA256: zipPin},
+		Tree:    programfiles.Tree{Name: "engine folder " + engineDir, Root: engineDir, Record: recordFile(manifestPath)},
 		Prefix:  zipPrefix,
-		Derive: func(m enginefiles.Manifest) error {
+		Derive: func(m programfiles.Manifest) error {
 			if got := digestHex(fromFiles(m).encode()); got != manifestPin {
 				return fmt.Errorf("thenoise: manifest recorded from the ZIP has SHA-256 %s, expected %s", got, manifestPin)
 			}
@@ -232,24 +233,26 @@ func writeFileAtomic(file string, data []byte) error {
 
 // launchEngine proves the installed engine against its pinned manifest
 // through the shared kit (INF-F1..INF-F4) and returns the hold the launch
-// keeps until the engine exits. A changed, missing or extra file or folder,
-// a link, or a folder without the read-only ACL refuses the launch and names
-// the reinstall step. A file another program holds so that the kit cannot
+// keeps until the engine exits. A folder whose files all prove but whose
+// read-only ACL is gone gets the ACL again, with one log line, and launches
+// (programfiles LaunchRepairing). A changed, missing or extra file or folder,
+// a link, or a folder whose ACL cannot be set again refuses the launch and
+// names the reinstall step. A file another program holds so that the kit cannot
 // open or read it refuses this launch only, with the system error and no
 // reinstall step.
-func launchEngine(ctx context.Context, v *enginefiles.Verifier, engineDir, manifestPath, manifestPin string) (*enginefiles.Hold, error) {
+func launchEngine(ctx context.Context, v *programfiles.Verifier, engineDir, manifestPath, manifestPin string) (*programfiles.Hold, error) {
 	m, err := readManifest(manifestPath, manifestPin)
 	if err != nil {
 		return nil, err
 	}
-	hold, err := v.Launch(ctx, engineTree(engineDir, manifestPath, m))
-	if errors.Is(err, enginefiles.ErrFolderACL) {
+	hold, _, err := v.LaunchRepairing(ctx, engineTree(engineDir, manifestPath, m), log.Writer())
+	if errors.Is(err, programfiles.ErrFolderACL) {
 		return nil, fmt.Errorf("thenoise: %w: delete the engine manifest under -state and start the provider with -engine-zip", err)
 	}
-	if errors.Is(err, enginefiles.ErrUnreadable) {
+	if errors.Is(err, programfiles.ErrUnreadable) {
 		return nil, fmt.Errorf("thenoise: %w: another program holds an engine file; try again once it lets go", err)
 	}
-	if errors.Is(err, enginefiles.ErrMismatch) {
+	if errors.Is(err, programfiles.ErrMismatch) {
 		return nil, fmt.Errorf("thenoise: %w: delete the engine manifest under -state and start the provider with -engine-zip to install the engine again", err)
 	}
 	if err != nil {

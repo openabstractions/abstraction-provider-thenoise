@@ -1,9 +1,11 @@
 package thenoise
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -11,12 +13,31 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	identity "github.com/openabstractions/abstraction-identity"
+	inference "github.com/openabstractions/abstraction-inference/go"
+	wire "github.com/openabstractions/abstraction-inference/go/abstraction/inference/api"
 	resourceclient "github.com/openabstractions/abstraction-resource/go/client"
 )
+
+func TestTransportDiagnosticIsInformationalAndPinsSelectedArchive(t *testing.T) {
+	var log, output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&log, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	logTransport(&output)
+	for _, want := range []string{`"level":"INFO"`, `"engine":"TheNoise"`, EngineZIPSHA256, `"transport":"tcp-loopback"`, "IPC not implemented in this adopter"} {
+		if !strings.Contains(log.String(), want) {
+			t.Fatalf("missing %q: %s", want, log.String())
+		}
+	}
+	if !strings.Contains(output.String(), EngineZIPSHA256) {
+		t.Fatal(output.String())
+	}
+}
 
 func TestOfficialLauncherCommandQuotesPathsAndSelectsCPU(t *testing.T) {
 	if runtime.GOOS != "windows" {
@@ -148,7 +169,9 @@ func TestManagedHostDeclaresExactModelWithoutStartingEngine(t *testing.T) {
 	if managed.current != nil {
 		t.Fatal("admission launched engine")
 	}
-	if reason, ok := managed.Admit(context.Background(), nil, "other"); ok || reason != "not_permitted" {
+	// The undeclared word is pytorch's and Lemonade's; not_permitted would
+	// fail a durable job as a rights refusal (INF-A5).
+	if reason, ok := managed.Admit(context.Background(), nil, "other"); ok || reason != "model:undeclared" {
 		t.Fatalf("wrong model admitted: %q", reason)
 	}
 	exe, err := os.Executable()
@@ -164,5 +187,55 @@ func TestManagedHostDeclaresExactModelWithoutStartingEngine(t *testing.T) {
 	defer host.Close()
 	if managed.active == nil || managed.current != nil {
 		t.Fatal("host activity was not wired or engine started early")
+	}
+	// A closing runtime is unavailable: a recovered job waits for the next
+	// process instead of failing as refused.
+	managed.Close()
+	if reason, ok := managed.Admit(context.Background(), nil, "flux_klein"); ok || reason != "unavailable" {
+		t.Fatalf("a closed runtime admitted: %q %v", reason, ok)
+	}
+}
+
+// The managed host routes its one declared model to TheNoise's engine: a
+// request for it is refused by the engine (one image per request), never
+// no_host. A provider whose router missed its host would answer no_host
+// "router:not-here", as pytorchd's image service did until 2026-11-09.
+// routeEndpoints numbers the routing test's pipes within this test process.
+var routeEndpoints atomic.Int64
+
+func TestManagedHostRoutesItsModelToTheEngine(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("official launcher is Windows only")
+	}
+	dir := t.TempDir()
+	launch := LaunchConfig{RuntimeDir: dir, StateDir: filepath.Join(dir, "state"), DiT: filepath.Join(dir, "dit.safetensors"), VAE: filepath.Join(dir, "vae.safetensors"),
+		TextEncoder: filepath.Join(dir, "text.safetensors"), Device: "cpu", Port: 18119,
+		ReadyTimeout: time.Minute, ForceTimeout: time.Second}
+	managed, err := NewRuntime(ManagedConfig{Engine: Config{Endpoint: "http://127.0.0.1:18119", Model: "flux_klein", MaxRun: time.Minute},
+		Launch: launch, Leases: resourceclient.Discover(), Resource: "memory", Amount: 1, Wait: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer managed.Close()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := fmt.Sprintf(`\\.\pipe\thenoise-route-test-%d-%d`, os.Getpid(), routeEndpoints.Add(1))
+	host, err := NewManagedHost(HostConfig{Endpoint: endpoint, RuntimePrograms: []string{exe}, StoreRoot: filepath.Join(dir, "store"),
+		RecordPath: filepath.Join(dir, "records.json"), HostName: "thenoise-fixture"}, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+	ctx := inference.WithDesignatedRuntime(inference.WithRoute(context.Background(), inference.RouteNative, exe))
+	caller := inference.Subject{Account: "test", Program: exe}
+	request := wire.ImageRequest{Model: "flux_klein", Mode: wire.ImageModeGenerate, Prompt: "a lighthouse", Size: "auto", Count: 2,
+		Guarantees: []wire.RequestGuarantee{wire.RequestGuaranteeLocalOnly}}
+	if a := host.Provider.StartImage(ctx, caller, request); a.Outcome != wire.StartOutcomeUnsupportedFeature || a.Reason != "count" {
+		t.Fatalf("declared model: %+v, wanted the engine's own count refusal", a)
+	}
+	if managed.current != nil {
+		t.Fatal("a refused request started the engine")
 	}
 }

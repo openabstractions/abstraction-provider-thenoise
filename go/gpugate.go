@@ -2,9 +2,10 @@ package thenoise
 
 import (
 	"errors"
+	"github.com/openabstractions/abstraction-facade/go/supervision"
 	"path/filepath"
 
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginelaunch"
+	"github.com/openabstractions/abstraction-provider-kit/go/enginelaunch"
 )
 
 // MaxEngineDirLength is the longest folder holding thenoise.bat, in UTF-16
@@ -16,7 +17,7 @@ const MaxEngineDirLength = 87
 
 // maxLibraryPath is the longest path the ROCm libraries open successfully
 // without Windows long-path support; the provider kit's gate owns it.
-const maxLibraryPath = enginelaunch.MaxLibraryPath
+const maxLibraryPath = supervision.MaxLibraryPath
 
 // ErrGPUPathTooDeep is the refusal of a GPU launch whose kernel library files
 // the bundled hipBLASLt or rocBLAS could not open. It is one plain sentence
@@ -42,7 +43,7 @@ func libraryDir(engineDir, library string) string {
 	return filepath.Join(engineDir, "Lib", "site-packages", "_rocm_sdk_libraries", "bin", library, "library", "gfx1151")
 }
 
-func utf16Len(s string) int { return enginelaunch.UTF16Len(s) }
+func utf16Len(s string) int { return supervision.UTF16Len(s) }
 
 // gpuProbe holds the operating-system questions the gate asks.
 type gpuProbe = enginelaunch.GPUProbe

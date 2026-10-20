@@ -1,11 +1,10 @@
 package thenoise
 
 import (
+	"github.com/openabstractions/abstraction-facade/go/supervision"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginelaunch"
 )
 
 // systemVariables are the Windows system and profile variables cmd.exe,
@@ -69,5 +68,5 @@ func launchEnv(stateDir string, gpu []string, onError func(error)) ([]string, er
 			}
 		}
 	}
-	return enginelaunch.CleanEnvironment{Temp: temp, WindowsDefaultPath: true, Names: systemVariables, Set: set, OnError: onError}.Build()
+	return supervision.CleanEnvironment{Temp: temp, WindowsDefaultPath: true, Names: systemVariables, Set: set, OnError: onError}.Build()
 }

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	identity "github.com/openabstractions/abstraction-identity"
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginehttp"
+	"github.com/openabstractions/abstraction-provider-kit/go/enginehttp"
 )
 
 // An engine address every connect fails to reach, with an error a starting

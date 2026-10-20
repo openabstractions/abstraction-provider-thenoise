@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openabstractions/abstraction-identity/placetest"
 	thenoise "github.com/openabstractions/abstraction-provider-thenoise/go"
 )
 
@@ -78,6 +79,19 @@ func TestEngineInstallDispatchRefusesUnpinnedArchiveWithoutLaunch(t *testing.T) 
 			t.Error(err)
 		}
 	})
+	// The fixture must reach the ZIP guard even below a nested development
+	// TEMP. Keep the same existing directory and the real engine path limit.
+	if short, shortErr := placetest.ShortName(root); shortErr == nil {
+		original, err := os.Stat(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		alias, err := os.Stat(short)
+		if err != nil || !os.SameFile(original, alias) {
+			t.Fatalf("fixture TEMP identity: %v", err)
+		}
+		root = short
+	}
 	archive := filepath.Join(root, "engine.zip")
 	if err := os.WriteFile(archive, []byte("unreviewed archive"), 0o600); err != nil {
 		t.Fatal(err)

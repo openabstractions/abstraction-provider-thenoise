@@ -13,8 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginefiles"
-	"github.com/openabstractions/abstraction-inference/go/providerhost/enginelaunch"
+	"github.com/openabstractions/abstraction-facade/go/programfiles"
+	"github.com/openabstractions/abstraction-facade/go/supervision"
+	"github.com/openabstractions/abstraction-provider-kit/go/enginelaunch"
 )
 
 // nameForTotal returns a kernel file name whose opened path below gfxDir is
@@ -66,7 +67,7 @@ func fakeProbe() gpuProbe {
 func kernelFiles(dir string) ([]string, error) { return enginelaunch.KernelFiles(dir) }
 
 func longestOpen(base string, lib gpuLibrary, files []string) int {
-	return enginelaunch.LongestOpen(base, lib.extra, files)
+	return supervision.LongestOpen(base, lib.extra, files)
 }
 
 // writeZIP writes a ZIP shaped like the pinned one: every entry named
@@ -134,7 +135,7 @@ func manifestPinOf(t *testing.T, file string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := enginefiles.ArchiveManifest(t.Context(), enginefiles.PinnedArchive{Path: file, Size: int64(len(data)), SHA256: digestHex(data)}, zipPrefix)
+	m, err := programfiles.ArchiveManifest(t.Context(), programfiles.PinnedArchive{Path: file, Size: int64(len(data)), SHA256: digestHex(data)}, zipPrefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,17 +171,17 @@ type testACL struct{ refuse bool }
 
 func (testACL) Restrict([]string) error { return nil }
 
-func (a testACL) Check(folder string, _ *enginefiles.Handle) error {
+func (a testACL) Check(folder string, _ *programfiles.Handle) error {
 	if a.refuse {
-		return fmt.Errorf("%w: %s", enginefiles.ErrFolderACL, folder)
+		return fmt.Errorf("%w: %s", programfiles.ErrFolderACL, folder)
 	}
 	return nil
 }
 
 // testFiles is a fresh provider process's verifier: its first launch of a
 // tree hashes every file.
-func testFiles() *enginefiles.Verifier {
-	return enginefiles.NewVerifier(enginefiles.Options{ACL: testACL{}})
+func testFiles() *programfiles.Verifier {
+	return programfiles.NewVerifier(programfiles.Options{ACL: testACL{}})
 }
 
 // verifyEngine proves the installed engine as a fresh provider process's
